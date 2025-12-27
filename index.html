@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyChat Pro - Multi-Room Messenger</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: white; }
+        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .sidebar { border-right: 1px solid rgba(255, 255, 255, 0.1); }
+        .message-bubble { max-width: 80%; border-radius: 18px; padding: 10px 15px; margin-bottom: 10px; }
+        .msg-other { background: rgba(255, 255, 255, 0.1); align-self: flex-start; }
+        .msg-me { background: #2563eb; align-self: flex-end; }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    </style>
+</head>
+<body class="h-screen flex items-center justify-center p-0 md:p-4">
+
+    <div id="auth-screen" class="glass p-8 rounded-3xl w-full max-w-md text-center shadow-2xl">
+        <h1 class="text-4xl font-bold mb-2">SkyChat</h1>
+        <p class="text-gray-400 mb-8">Echtzeit Messenger & Gruppen</p>
+        <button id="login-google" class="w-full bg-white text-black font-bold py-3 rounded-xl mb-4 hover:bg-gray-200 transition">Mit Google anmelden</button>
+        <div class="flex items-center my-4"><div class="flex-grow border-t border-gray-700"></div><span class="px-3 text-gray-500 text-sm">oder</span><div class="flex-grow border-t border-gray-700"></div></div>
+        <input id="email" type="email" placeholder="E-Mail" class="w-full bg-black/20 border border-gray-700 rounded-xl px-4 py-3 mb-2 focus:outline-none focus:border-blue-500">
+        <input id="password" type="password" placeholder="Passwort" class="w-full bg-black/20 border border-gray-700 rounded-xl px-4 py-3 mb-6">
+        <button id="login-email" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-bold transition">Anmelden / Registrieren</button>
+    </div>
+
+    <div id="app-screen" class="hidden glass w-full h-full md:h-[90vh] md:max-w-6xl rounded-none md:rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-2xl">
+        
+        <div class="sidebar w-full md:w-80 flex flex-col p-4 bg-black/20">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold">Räume</h2>
+                <button id="logout-btn" class="text-xs text-gray-500 hover:text-white">Abmelden</button>
+            </div>
+
+            <div class="flex gap-2 mb-4">
+                <input id="search-input" type="text" placeholder="Raum suchen..." class="flex-grow bg-black/40 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                <button id="search-btn" class="bg-gray-700 px-3 rounded-lg text-xs">Beitreten</button>
+            </div>
+
+            <div id="my-rooms" class="flex-grow overflow-y-auto space-y-2 mb-4">
+                <div onclick="switchRoom('global', 'Globaler Chat')" class="p-3 bg-blue-600/20 border border-blue-500/30 rounded-xl cursor-pointer hover:bg-blue-600/40 transition"># Globaler Chat</div>
+            </div>
+
+            <div class="pt-4 border-t border-gray-700">
+                <input id="new-room-name" type="text" placeholder="Gruppenname..." class="w-full bg-black/40 border border-gray-700 rounded-lg px-3 py-2 text-sm mb-2">
+                <button id="create-room-btn" class="w-full bg-green-600 hover:bg-green-700 py-2 rounded-lg text-sm font-bold transition">Gruppe erstellen</button>
+            </div>
+        </div>
+
+        <div class="flex-grow flex flex-col h-full bg-black/10">
+            <div class="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
+                <h2 id="current-room-title" class="text-lg font-bold"># Globaler Chat</h2>
+            </div>
+            
+            <div id="messages-container" class="flex-grow overflow-y-auto p-4 flex flex-col">
+                </div>
+
+            <div class="p-4 bg-white/5 border-t border-white/10 flex gap-2">
+                <input id="message-input" type="text" placeholder="Nachricht..." class="flex-grow bg-black/40 border border-gray-700 rounded-xl px-4 py-3 focus:outline-none">
+                <button id="send-btn" class="bg-blue-600 px-6 rounded-xl font-bold hover:bg-blue-700 transition">Senden</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, doc, getDocs, updateDoc, arrayUnion, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // FIREBASE KONFIGURATION
+        const firebaseConfig = {
+            apiKey: "AIzaSyAh2LCnBPXqhhj8Gst0VdG2FrKUpMJ4DQk",
+  authDomain: "chatroom-241f9.firebaseapp.com",
+  projectId: "chatroom-241f9",
+  storageBucket: "chatroom-241f9.firebasestorage.app",
+  messagingSenderId: "20602857470",
+  appId: "1:20602857470:web:a18a89ffeb667bed35c2af"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const googleProvider = new GoogleAuthProvider();
+
+        let currentUser = null;
+        let currentRoomId = "global";
+        let unsubscribeMessages = null;
+
+        // --- AUTH STEUERUNG ---
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('auth-screen').classList.add('hidden');
+                document.getElementById('app-screen').classList.remove('hidden');
+                await syncUserRecord();
+                loadUserRooms();
+                window.switchRoom('global', 'Globaler Chat');
+            } else {
+                document.getElementById('auth-screen').classList.remove('hidden');
+                document.getElementById('app-screen').classList.add('hidden');
+            }
+        });
+
+        async function syncUserRecord() {
+            const userRef = doc(db, "users", currentUser.uid);
+            const snap = await getDoc(userRef);
+            if (!snap.exists()) {
+                await setDoc(userRef, { rooms: ["global"], email: currentUser.email });
+            }
+        }
+
+        document.getElementById('login-google').onclick = () => signInWithPopup(auth, googleProvider);
+        document.getElementById('login-email').onclick = async () => {
+            const email = document.getElementById('email').value;
+            const pass = document.getElementById('password').value;
+            try {
+                await signInWithEmailAndPassword(auth, email, pass);
+            } catch {
+                await createUserWithEmailAndPassword(auth, email, pass);
+            }
+        };
+        document.getElementById('logout-btn').onclick = () => signOut(auth);
+
+        // --- RAUM MANAGEMENT ---
+        async function loadUserRooms() {
+            onSnapshot(doc(db, "users", currentUser.uid), async (docSnap) => {
+                const roomList = document.getElementById('my-rooms');
+                roomList.innerHTML = `<div onclick="switchRoom('global', 'Globaler Chat')" class="p-3 bg-blue-600/20 border border-blue-500/30 rounded-xl cursor-pointer mb-2"># Globaler Chat</div>`;
+                
+                const userRooms = docSnap.data()?.rooms || [];
+                for (let roomId of userRooms) {
+                    if (roomId === "global") continue;
+                    const rSnap = await getDoc(doc(db, "rooms", roomId));
+                    if (rSnap.exists()) {
+                        const div = document.createElement('div');
+                        div.className = "p-3 bg-white/5 rounded-xl cursor-pointer hover:bg-white/10 transition mb-2";
+                        div.innerText = "# " + rSnap.data().name;
+                        div.onclick = () => window.switchRoom(roomId, rSnap.data().name);
+                        roomList.appendChild(div);
+                    }
+                }
+            });
+        }
+
+        document.getElementById('create-room-btn').onclick = async () => {
+            const name = document.getElementById('new-room-name').value.trim();
+            if (!name) return;
+            const newRoom = await addDoc(collection(db, "rooms"), { name, owner: currentUser.uid });
+            await updateDoc(doc(db, "users", currentUser.uid), { rooms: arrayUnion(newRoom.id) });
+            document.getElementById('new-room-name').value = "";
+        };
+
+        document.getElementById('search-btn').onclick = async () => {
+            const term = document.getElementById('search-input').value.trim();
+            const q = query(collection(db, "rooms"), where("name", "==", term));
+            const snap = await getDocs(q);
+            if (snap.empty) return alert("Raum nicht gefunden!");
+            const roomId = snap.docs[0].id;
+            await updateDoc(doc(db, "users", currentUser.uid), { rooms: arrayUnion(roomId) });
+            document.getElementById('search-input').value = "";
+        };
+
+        // --- CHAT LOGIK ---
+        window.switchRoom = (id, name) => {
+            currentRoomId = id;
+            document.getElementById('current-room-title').innerText = "# " + name;
+            if (unsubscribeMessages) unsubscribeMessages();
+            
+            const q = query(collection(db, "messages"), where("roomId", "==", id), orderBy("createdAt", "asc"));
+            unsubscribeMessages = onSnapshot(q, (snap) => {
+                const container = document.getElementById('messages-container');
+                container.innerHTML = "";
+                snap.forEach(d => {
+                    const data = d.data();
+                    const isMe = data.senderId === currentUser.uid;
+                    const div = document.createElement('div');
+                    div.className = `message-bubble ${isMe ? 'msg-me' : 'msg-other'}`;
+                    div.innerHTML = `<p class="text-[10px] opacity-50">${data.senderName}</p><p>${data.text}</p>`;
+                    container.appendChild(div);
+                });
+                container.scrollTop = container.scrollHeight;
+            });
+        };
+
+        document.getElementById('send-btn').onclick = async () => {
+            const text = document.getElementById('message-input').value.trim();
+            if (!text) return;
+            await addDoc(collection(db, "messages"), {
+                text,
+                roomId: currentRoomId,
+                senderId: currentUser.uid,
+                senderName: currentUser.displayName || currentUser.email.split('@')[0],
+                createdAt: serverTimestamp()
+            });
+            document.getElementById('message-input').value = "";
+        };
+    </script>
+</body>
+</html>
